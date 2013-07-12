@@ -19,9 +19,11 @@
 #include "ax25.h"
 #include "gps.h"
 #include "aprs.h"
-//#include "sensors.h"
+//#include "sensors_avr.h"
+//#include "sensors_pic32.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <Arduino.h>
 
 // Module functions
 float meters_to_feet(float m)
@@ -53,7 +55,7 @@ void aprs_send()
   ax25_send_string(gps_aprs_lat);     // Lat: 38deg and 22.20 min (.20 are NOT seconds, but 1/100th of minutes)
   ax25_send_byte('/');                // Symbol table
   ax25_send_string(gps_aprs_lon);     // Lon: 000deg and 25.80 min
-  ax25_send_byte('X');                // Symbol: O=balloon, -=QTH
+  ax25_send_byte('O');                // Symbol: O=balloon, -=QTH
   snprintf(temp, 4, "%03d", (int)(gps_course + 0.5)); 
   ax25_send_string(temp);             // Course (degrees)
   ax25_send_byte('/');                // and
@@ -62,12 +64,19 @@ void aprs_send()
   ax25_send_string("/A=");            // Altitude (feet). Goes anywhere in the comment area
   snprintf(temp, 7, "%06ld", (long)(meters_to_feet(gps_altitude) + 0.5));
   ax25_send_string(temp);
-//  ax25_send_string("/Ti=");
-//  ax25_send_string(itoa(sensors_int_lm60(), temp, 10));
-//  ax25_send_string("/Te=");
-//  ax25_send_string(itoa(sensors_ext_lm60(), temp, 10));
+ /* ax25_send_string("/Ti=");
+  snprintf(temp, 6, "%d", sensors_int_lm60());
+  ax25_send_string(temp);
+  ax25_send_string("/Te=");
+  snprintf(temp, 6, "%d", sensors_ext_lm60());
+  ax25_send_string(temp);
+  ax25_send_string("/V=");
+  snprintf(temp, 6, "%d", sensors_vin());
+  ax25_send_string(temp);
+  */
   ax25_send_byte(' ');
   ax25_send_string(APRS_COMMENT);     // Comment
   ax25_send_footer();
+
   ax25_flush_frame();                 // Tell the modem to go
 }

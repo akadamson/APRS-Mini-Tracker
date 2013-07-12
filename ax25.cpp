@@ -17,18 +17,25 @@
 
 #include "ax25.h"
 #include "config.h"
-#include "modem.h"
-#include <WProgram.h>
+#include "afsk_avr.h"
+//#include "afsk_pic32.h"
+#include <stdint.h>
+#include <Arduino.h>
+
+// Module constants
+static const unsigned int MAX_PACKET = 512;  // bytes
 
 // Module globals
-unsigned short int crc;
-int ones_in_a_row;
+static uint16_t crc;
+static uint8_t ones_in_a_row;
+static uint8_t packet[MAX_PACKET];
+static unsigned int packet_size;
 
 // Module functions
 static void
-update_crc(unsigned char bit) 
+update_crc(uint8_t a_bit) 
 {
-  crc ^= bit;
+  crc ^= a_bit;
   if (crc & 1)
     crc = (crc >> 1) ^ 0x8408;  // X-modem CRC poly
   else
@@ -36,51 +43,53 @@ update_crc(unsigned char bit)
 }
 
 static void
-send_byte(unsigned char byte)
+send_byte(uint8_t a_byte)
 {
-  int i;
-  for (i = 0; i < 8; i++) {
-    update_crc((byte >> i) & 1);
-    if ((byte >> i) & 1) {
+  uint8_t i = 0;
+  while (i++ < 8) {
+    uint8_t a_bit = a_byte & 1;
+    a_byte >>= 1;
+    update_crc(a_bit);
+    if (a_bit) {
       // Next bit is a '1'
-      if (modem_packet_size >= MODEM_MAX_PACKET * 8)  // Prevent buffer overrun
+      if (packet_size >= MAX_PACKET * 8)  // Prevent buffer overrun
         return;
-      modem_packet[modem_packet_size >> 3] |= (1 << (modem_packet_size & 7));
-      modem_packet_size++;
+      packet[packet_size >> 3] |= (1 << (packet_size & 7));
+      packet_size++;
       if (++ones_in_a_row < 5) continue;
     }
     // Next bit is a '0' or a zero padding after 5 ones in a row
-    if (modem_packet_size >= MODEM_MAX_PACKET * 8)    // Prevent buffer overrun
+    if (packet_size >= MAX_PACKET * 8)    // Prevent buffer overrun
       return;
-    modem_packet[modem_packet_size >> 3] &= ~(1 << (modem_packet_size & 7));
-    modem_packet_size++;
+    packet[packet_size >> 3] &= ~(1 << (packet_size & 7));
+    packet_size++;
     ones_in_a_row = 0;
   }
 }
 
 // Exported functions
 void
-ax25_send_byte(unsigned char byte)
+ax25_send_byte(uint8_t a_byte)
 {
   // Wrap around send_byte, but prints debug info
-  send_byte(byte);
+  send_byte(a_byte);
 #ifdef DEBUG_AX25
-  Serial.print((char)byte);
+  Serial.print((char)a_byte);
 #endif
 }
 
 void
 ax25_send_flag()
 {
-  unsigned char byte = 0x7e;
+  uint8_t flag = 0x7e;
   int i;
-  for (i = 0; i < 8; i++, modem_packet_size++) {
-    if (modem_packet_size >= MODEM_MAX_PACKET * 8)  // Prevent buffer overrun
+  for (i = 0; i < 8; i++, packet_size++) {
+    if (packet_size >= MAX_PACKET * 8)  // Prevent buffer overrun
       return;
-    if ((byte >> i) & 1)
-      modem_packet[modem_packet_size >> 3] |= (1 << (modem_packet_size & 7));
+    if ((flag >> i) & 1)
+      packet[packet_size >> 3] |= (1 << (packet_size & 7));
     else
-      modem_packet[modem_packet_size >> 3] &= ~(1 << (modem_packet_size & 7));
+      packet[packet_size >> 3] &= ~(1 << (packet_size & 7));
   }
 }
 
@@ -97,7 +106,7 @@ void
 ax25_send_header(const struct s_address *addresses, int num_addresses)
 {
   int i, j;
-  modem_packet_size = 0;
+  packet_size = 0;
   ones_in_a_row = 0;
   crc = 0xffff;
   
@@ -129,6 +138,9 @@ ax25_send_header(const struct s_address *addresses, int num_addresses)
 #ifdef DEBUG_AX25
   // Print source callsign
   Serial.println();
+  Serial.print('[');
+  Serial.print(millis());
+  Serial.print("] ");
   Serial.print(addresses[1].callsign);
   if (addresses[1].ssid) {
     Serial.print('-');
@@ -157,7 +169,7 @@ void
 ax25_send_footer()
 {
   // Save the crc so that it can be treated it atomically
-  unsigned short int final_crc = crc;
+  uint16_t final_crc = crc;
   
   // Send the CRC
   send_byte(~(final_crc & 0xff));
@@ -175,7 +187,8 @@ void
 ax25_flush_frame()
 {
   // Key the transmitter and send the frame
-  modem_flush_frame();
+  afsk_send(packet, packet_size);
+  afsk_start();
 }
 
 

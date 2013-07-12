@@ -16,22 +16,26 @@
  */
 
 #include "config.h"
+#include "pin.h"
 #include "radio_hx1.h"
-#include <WProgram.h>
+#include <Arduino.h>
 
 
 void RadioHx1::setup()
 {
-  // Nothing to set up... This is a really simple radio
+  // Configure pins
+  pinMode(PTT_PIN, OUTPUT);
+  pin_write(PTT_PIN, LOW);
+  pinMode(AUDIO_PIN, OUTPUT);
 }
 
 void RadioHx1::ptt_on()
 {
-  digitalWrite(PTT_PIN, HIGH);
-  delay(5);   // The HX1 takes 5 ms from PTT to full RF
+  pin_write(PTT_PIN, HIGH);
+  delay(25);   // The HX1 takes 5 ms from PTT to full RF, give it 25
 }
 
 void RadioHx1::ptt_off()
 {
-  digitalWrite(PTT_PIN, LOW);
+  pin_write(PTT_PIN, LOW);
 }

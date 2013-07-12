@@ -1,4 +1,4 @@
-/* trackuino copyright (C) 2010  EA5HAV Javi
+ /* trackuino copyright (C) 2010  EA5HAV Javi
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -14,43 +14,32 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
+#ifdef AVR
 
-/* Credit to:
- *
- * Michael Smith for his Example of Audio generation with two timers and PWM:
- * http://www.arduino.cc/playground/Code/PCMAudio
- *
- * Ken Shirriff for his Great article on PWM:
- * http://arcfn.com/2009/07/secrets-of-arduino-pwm.html 
- *
- * The large group of people who created the free AVR tools.
- * Documentation on interrupts:
- * http://www.nongnu.org/avr-libc/user-manual/group__avr__interrupts.html
- */
-
-#include "config.h"
-#include "modem.h"
-#include "radio_mx146.h"
-#include "radio_hx1.h"
-#include <WProgram.h>
-#include <stdint.h>
-#include <avr/interrupt.h>
 #include <avr/io.h>
 #include <avr/pgmspace.h>
+#include "config.h"
+#include "afsk_avr.h"
 
-#if AUDIO_PIN == 3
-#  define OCR2 OCR2B
-#endif
-#if AUDIO_PIN == 11
-#  define OCR2 OCR2A
-#endif
 
-// Module Constants
+// Module consts
+
+/* The sine_table is the carrier signal. To achieve phase continuity, each tone
+ * starts at the index where the previous one left off. By changing the stride of
+ * the index (phase_delta) we get 1200 or 2200 Hz. The PHASE_DELTA_XXXX values
+ * can be calculated as:
+ * 
+ * Fg = frequency of the output tone (1200 or 2200)
+ * Fm = sampling rate (PLAYBACK_RATE_HZ)
+ * Tt = sine table size (TABLE_SIZE)
+ * 
+ * PHASE_DELTA_Fg = Tt*(Fg/Fm)
+ */
 
 // This procudes a "warning: only initialized variables can be placed into
 // program memory area", which can be safely ignored:
 // http://gcc.gnu.org/bugzilla/show_bug.cgi?id=34734
-PROGMEM const prog_uchar sine_table[512] = {
+PROGMEM extern const prog_uchar afsk_sine_table[512] = {
   127, 129, 130, 132, 133, 135, 136, 138, 139, 141, 143, 144, 146, 147, 149, 150, 152, 153, 155, 156, 158, 
   159, 161, 163, 164, 166, 167, 168, 170, 171, 173, 174, 176, 177, 179, 180, 182, 183, 184, 186, 187, 188, 
   190, 191, 193, 194, 195, 197, 198, 199, 200, 202, 203, 204, 205, 207, 208, 209, 210, 211, 213, 214, 215, 
@@ -78,58 +67,19 @@ PROGMEM const prog_uchar sine_table[512] = {
   115, 116, 118, 119, 121, 122, 124, 125
 };
 
-/* The sine_table is the carrier signal. To achieve phase continuity, each tone
- * starts at the index where the previous one left off. By changing the stride of
- * the index (phase_delta) we get 1200 or 2200 Hz. The PHASE_DELTA_XXXX values
- * can be calculated as:
- * 
- * Fg = frequency of the output tone (1200 or 2200)
- * Fm = sampling rate (PLAYBACK_RATE_HZ)
- * Tt = sine table size (TABLE_SIZE)
- * 
- * PHASE_DELTA_Fg = Tt*(Fg/Fm)
- */
+// External consts
 
-static const unsigned char REST_DUTY       = 127;
-static const int TABLE_SIZE                = sizeof(sine_table);
-static const unsigned long PLAYBACK_RATE   = F_CPU / 256;    // 62.5KHz @ F_CPU=16MHz
-static const int BAUD_RATE                 = 1200;
-static const unsigned char SAMPLES_PER_BAUD= (PLAYBACK_RATE / BAUD_RATE);
-static const unsigned int PHASE_DELTA_1200 = (((TABLE_SIZE * 1200L) << 7) / PLAYBACK_RATE); // Fixed point 9.7
-static const unsigned int PHASE_DELTA_2200 = (((TABLE_SIZE * 2200L) << 7) / PLAYBACK_RATE);
+extern const uint32_t MODEM_CLOCK_RATE = F_CPU; // 16 MHz
+extern const uint8_t REST_DUTY         = 127;
+extern const uint16_t TABLE_SIZE       = sizeof(afsk_sine_table);
+//extern const uint32_t PLAYBACK_RATE    = MODEM_CLOCK_RATE / 510;  // Phase correct PWM
+extern const uint32_t PLAYBACK_RATE    = MODEM_CLOCK_RATE / 256;  // Fast PWM
 
 
-// Module globals
-static unsigned char current_byte;
-static unsigned char current_sample_in_baud;    // 1 bit = SAMPLES_PER_BAUD samples
-static bool go = false;                         // Modem is on
-static unsigned int phase_delta;                // 1200/2200 for standard AX.25
-static unsigned int phase;                      // Fixed point 9.7 (2PI = TABLE_SIZE)
-static unsigned int packet_pos;                 // Next bit to be sent out
-#ifdef DEBUG_MODEM
-static int overruns = 0;
-static unsigned int slow_isr_time;
-static unsigned int slow_packet_pos;
-static unsigned char slow_sample_in_baud;
-#endif
+// Exported functions
 
-// The radio (class defined in config.h)
-static RADIO_CLASS radio;
-
-// Exported globals
-unsigned int modem_packet_size = 0;
-unsigned char modem_packet[MODEM_MAX_PACKET];
-
-void modem_setup()
+void afsk_timer_setup()
 {
-  // Configure pins
-  pinMode(PTT_PIN, OUTPUT);
-  digitalWrite(PTT_PIN, LOW);
-  pinMode(AUDIO_PIN, OUTPUT);
-
-  // Start radio
-  radio.setup();
-
   // Set up Timer 2 to do pulse width modulation on the speaker
   // pin.
   
@@ -137,9 +87,16 @@ void modem_setup()
   ASSR &= ~(_BV(EXCLK) | _BV(AS2));
   
   // Set fast PWM mode with TOP = 0xff: WGM22:0 = 3  (p.150)
+  // This allows 256 cycles per sample and gives 16M/256 = 62.5 KHz PWM rate
+  
   TCCR2A |= _BV(WGM21) | _BV(WGM20);
   TCCR2B &= ~_BV(WGM22);
-
+  
+  // Phase correct PWM with top = 0xff: WGM22:0 = 1 (p.152 and p.160))
+  // This allows 510 cycles per sample and gives 16M/510 = ~31.4 KHz PWM rate
+  //TCCR2A = (TCCR2A | _BV(WGM20)) & ~_BV(WGM21);
+  //TCCR2B &= ~_BV(WGM22);
+  
 #if AUDIO_PIN == 11
   // Do non-inverting PWM on pin OC2A (arduino pin 11) (p.159)
   // OC2B (arduino pin 3) stays in normal port operation:
@@ -161,23 +118,8 @@ void modem_setup()
   OCR2 = REST_DUTY;
 }
 
-int
-modem_busy()
+void afsk_timer_start()
 {
-  return go;
-}
-
-void modem_flush_frame()
-{
-  phase_delta = PHASE_DELTA_1200;
-  phase = 0;
-  packet_pos = 0;
-  current_sample_in_baud = 0;
-  go = true;
-  
-  // Key the radio
-  radio.ptt_on();
-
   // Clear the overflow flag, so that the interrupt doesn't go off
   // immediately and overrun the next one (p.163).
   TIFR2 |= _BV(TOV2);       // Yeah, writing a 1 clears the flag.
@@ -186,73 +128,14 @@ void modem_flush_frame()
   TIMSK2 |= _BV(TOIE2);
 }
 
-// This is called at PLAYBACK_RATE Hz to load the next sample.
-ISR(TIMER2_OVF_vect) {
-
-  if (go) {
-
-    // If done sending packet
-    if (packet_pos == modem_packet_size) {
-      go = false;             // End of transmission
-      OCR2 = REST_DUTY;       // Output 0v (after DC coupling)
-      radio.ptt_off();        // Release PTT
-      TIMSK2 &= ~_BV(TOIE2);  // Disable playback interrupt.
-      goto end_isr;           // Done, gather ISR stats
-    }
-
-    // If sent SAMPLES_PER_BAUD already, go to the next bit
-    if (current_sample_in_baud == 0) {    // Load up next bit
-      if ((packet_pos & 7) == 0)          // Load up next byte
-        current_byte = modem_packet[packet_pos >> 3];
-      else
-        current_byte = current_byte / 2;  // ">>1" forces int conversion
-      if ((current_byte & 1) == 0) {
-        // Toggle tone (1200 <> 2200)
-        phase_delta ^= (PHASE_DELTA_1200 ^ PHASE_DELTA_2200);
-      }
-    }
-    
-    phase += phase_delta;
-    OCR2 = pgm_read_byte_near(sine_table + ((phase >> 7) & (TABLE_SIZE - 1)));
-    
-    if(++current_sample_in_baud == SAMPLES_PER_BAUD) {
-      current_sample_in_baud = 0;
-      packet_pos++;
-    }
-  }
- 
-end_isr:
-#ifdef DEBUG_MODEM
-  unsigned int t = (unsigned int) TCNT2;
-  // Signal overrun if we received an interrupt while processing this one
-  if (TIFR2 & _BV(TOV2)) {
-    overruns++;
-    t += 256;
-  }
-  // Keep the slowest execution time in slow_isr_time
-  if (t > slow_isr_time) {
-    slow_isr_time = t;
-    slow_packet_pos = packet_pos;
-    slow_sample_in_baud = current_sample_in_baud;
-  }
-#endif
-  return;
-}
-
-#ifdef DEBUG_MODEM
-void modem_debug()
+void afsk_timer_stop()
 {
-  Serial.print("t=");
-  Serial.print(slow_isr_time);
-  Serial.print(", pos=");
-  Serial.print(slow_packet_pos);
-  Serial.print(", sam=");
-  Serial.println(slow_sample_in_baud, DEC);
-  slow_isr_time = 0;
-  if (overruns) {
-    Serial.print("MODEM OVERRUNS: ");
-    Serial.println(overruns);
-    overruns = 0;
-  } 
+  // Output 0v (after DC coupling)
+  OCR2 = REST_DUTY;
+
+  // Disable playback interrupt
+  TIMSK2 &= ~_BV(TOIE2);
 }
-#endif
+
+
+#endif // ifdef AVR

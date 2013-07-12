@@ -19,7 +19,7 @@
 #define __AX25_H__
 
 struct s_address {
-	char callsign[7];
+	char callsign[8];
 	unsigned char ssid;
 };
 

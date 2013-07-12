@@ -15,20 +15,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef __RADIO_MX146_H__
-#define __RADIO_MX146_H__
+#ifndef __PIN_H__
+#define __PIN_H__
 
-#include "radio.h"
+#include <stdint.h>
 
-class RadioMx146 : public Radio {
-  public:
-    virtual void setup();
-    virtual void ptt_on();
-    virtual void ptt_off();
-  private:
-    void send_cmd(const char *cmd, int cmd_len, char *res, int res_len);
-    void set_freq(unsigned long freq);
-    int query_temp();
-};
+void pin_write(uint8_t pin, uint8_t val);
 
-#endif
+#endif // ifndef __PIN_H__
+

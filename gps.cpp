@@ -17,7 +17,7 @@
 
 #include "config.h"
 #include "gps.h"
-#include <WProgram.h>
+#include <Arduino.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -94,8 +94,9 @@ static char token[16];
 static int num_tokens = 0;
 static unsigned int offset = 0;
 static bool active = false;
-static char gga_time[7], rmc_time[7];
+static char gga_time[7] = "", rmc_time[7] = "";
 static char new_time[7];
+static uint32_t new_seconds;
 static float new_lat;
 static float new_lon;
 static char new_aprs_lat[9];
@@ -106,6 +107,7 @@ static float new_altitude;
 
 // Public (extern) variables, readable from other modules
 char gps_time[7];       // HHMMSS
+uint32_t gps_seconds = 0;   // seconds after midnight
 float gps_lat = 0;
 float gps_lon = 0;
 char gps_aprs_lat[9];
@@ -142,6 +144,13 @@ void parse_time(const char *token)
 {
   // Time can have decimals (fractions of a second), but we only take HHMMSS
   strncpy(new_time, token, 6);
+  // Terminate string
+  new_time[6] = '\0';
+  
+  new_seconds = 
+    ((new_time[0] - '0') * 10 + (new_time[1] - '0')) * 60 * 60UL +
+    ((new_time[2] - '0') * 10 + (new_time[3] - '0')) * 60 +
+    ((new_time[4] - '0') * 10 + (new_time[5] - '0'));
 }
 
 void parse_status(const char *token)
@@ -165,6 +174,7 @@ void parse_lat(const char *token)
   }
   // APRS-ready latitude
   strncpy(new_aprs_lat, token, 7);
+  new_aprs_lat[7] = '\0';
 }
 
 void parse_lat_hemi(const char *token)
@@ -188,6 +198,7 @@ void parse_lon(const char *token)
   }
   // APRS-ready longitude
   strncpy(new_aprs_lon, token, 8);
+  new_aprs_lon[8] = '\0';
 }
 
 void parse_lon_hemi(const char *token)
@@ -234,7 +245,8 @@ bool gps_decode(char c)
 
       if (num_tokens && our_checksum == their_checksum) {
 #ifdef DEBUG_GPS
-        Serial.print(" (OK!)");
+        Serial.print(" (OK!) ");
+        Serial.print(millis());
 #endif
         // Return a valid position only when we've got two rmc and gga
         // messages with the same timestamp.
@@ -262,16 +274,17 @@ bool gps_decode(char c)
         //    reports 24 deg N, 121 deg E (the middle of Taiwan) until a valid
         //    fix is acquired:
         //
-        //    $GPGGA,120003.000,2400.0000,N,12100.0000,E,0,00,0.0,0.0,M,0.0,M,,0000**69 (OK!)
-        //    $GPGSA,A,1,,,,,,,,,,,,,0.0,0.0,0.0**30 (OK!)
-        //    $GPRMC,120003.000,V,2400.0000,N,12100.0000,E,000.0,000.0,280606,,,N**78 (OK!)
-        //    $GPVTG,000.0,T,,M,000.0,N,000.0,K,N**02 (OK!)
+        //    $GPGGA,120003.000,2400.0000,N,12100.0000,E,0,00,0.0,0.0,M,0.0,M,,0000*69 (OK!)
+        //    $GPGSA,A,1,,,,,,,,,,,,,0.0,0.0,0.0*30 (OK!)
+        //    $GPRMC,120003.000,V,2400.0000,N,12100.0000,E,000.0,000.0,280606,,,N*78 (OK!)
+        //    $GPVTG,000.0,T,,M,000.0,N,000.0,K,N*02 (OK!)
 
         if (sentence_type != SENTENCE_UNK &&      // Known sentence?
             strcmp(gga_time, rmc_time) == 0 &&    // RMC/GGA times match?
             active) {                             // Valid fix?
           // Atomically merge data from the two sentences
           strcpy(gps_time, new_time);
+          gps_seconds = new_seconds;
           gps_lat = new_lat;
           gps_lon = new_lon;
           strcpy(gps_aprs_lat, new_aprs_lat);
@@ -295,12 +308,9 @@ bool gps_decode(char c)
       break;
     
     case '*':
-      // Begin of checksum and process token (ie. do not break)
+      // Handle as ',', but prepares to receive checksum (ie. do not break)
       at_checksum = true;
       our_checksum ^= c;
-#ifdef DEBUG_GPS
-      Serial.print(c);
-#endif
 
     case ',':
       // Process token
