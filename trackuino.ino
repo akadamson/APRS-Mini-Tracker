@@ -52,7 +52,11 @@
 
 // Arduino/AVR libs
 #include <Wire.h>
+#if defined(ARDUINO) && ARDUINO >= 100
 #include <Arduino.h>
+#else
+#include <WProgram.h>
+#endif
 
 // Module constants
 static const uint32_t VALID_POS_TIMEOUT = 2000;  // ms

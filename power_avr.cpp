@@ -19,7 +19,11 @@
 #include <avr/power.h>
 #include <avr/interrupt.h>
 #include <avr/sleep.h>
+#if defined(ARDUINO) && ARDUINO >= 100
 #include <Arduino.h>
+#else
+#include <WProgram.h>
+#endif
 #include "config.h"
 #include "pin.h"
 #include "power.h"

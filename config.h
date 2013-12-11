@@ -46,6 +46,17 @@
 #define D_CALLSIGN      "APRS"
 #define D_CALLSIGN_ID   0
 
+
+// APRS Symbol
+// Consists of Symbol table (/ or \ or a dew overlay symbols) and the symbol ID
+#define APRS_SYMBOL_TABLE '/' // Default table
+//#define APRS_SYMBOL_TABLE '\\' // Secondary table (needs to be escaped => two \)
+
+//#define APRS_SYMBOL_ID    '>' // /> = Car
+//#define APRS_SYMBOL_ID    'O' // /O = Balloon
+#define APRS_SYMBOL_ID      'J' // /J = crosshairs
+//#define APRS_SYMBOL_ID    'N' // \N = Buoy
+
 // Digipeating paths:
 // (read more about digipeating paths here: http://wa8lmf.net/DigiPaths/ )
 // The recommended digi path for a balloon is WIDE2-1 or pathless. The default

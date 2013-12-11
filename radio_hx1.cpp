@@ -18,8 +18,12 @@
 #include "config.h"
 #include "pin.h"
 #include "radio_hx1.h"
-#include <Arduino.h>
 
+#if defined(ARDUINO) && ARDUINO >= 100
+#include <Arduino.h>
+#else
+#include <WProgram.h>
+#endif
 
 void RadioHx1::setup()
 {
