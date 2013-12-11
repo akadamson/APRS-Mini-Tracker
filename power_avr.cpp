@@ -17,7 +17,7 @@
 #ifdef AVR
 
 #include <avr/power.h>
-#include <avr/signal.h>
+#include <avr/interrupt.h>
 #include <avr/sleep.h>
 #include <Arduino.h>
 #include "config.h"
